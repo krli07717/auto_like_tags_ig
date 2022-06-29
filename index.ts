@@ -7,6 +7,7 @@ async function main() {
     const page = await browser.newPage();
     const myBot = new Bot(page);
     await myBot.init();
+    await myBot.likeRecentNichePosts();
   } catch (error) {
     throw error;
   }
@@ -20,5 +21,4 @@ main();
 // 300-500 per day
 
 // don't act like a bot, leave space
-// likes in niche hashtag group, where not-yet-liked, likes-of-post <= 200
 // leave comment report with account, posts,
