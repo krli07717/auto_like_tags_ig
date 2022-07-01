@@ -4,20 +4,27 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "ts-node ./index.ts",
+    "start": "ts-node index.ts",
     "start:nodemon": "tsc-watch --noClear --onSuccess \"node ./build/index.js\"",
     "build": "npx tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "typeorm": "typeorm-ts-node-commonjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "ts-node": "^10.8.1",
+    "@types/luxon": "^2.3.2",
+    "@types/node": "^16.11.10",
+    "ts-node": "10.7.0",
     "tsc-watch": "^5.0.3",
-    "typescript": "^4.7.4"
+    "typescript": "4.5.2"
   },
   "dependencies": {
-    "puppeteer": "^15.1.1"
+    "luxon": "^2.4.0",
+    "puppeteer": "^15.1.1",
+    "reflect-metadata": "^0.1.13",
+    "sqlite3": "^5.0.8",
+    "typeorm": "^0.3.7"
   }
 }

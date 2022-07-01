@@ -1,12 +1,15 @@
 import Bot from "./src/Bot";
-import puppeteer from "puppeteer";
+import { dataSource } from "./db";
 
 async function main() {
   try {
-    const browser = await puppeteer.launch({ headless: false, slowMo: 150 });
-    const page = await browser.newPage();
-    const myBot = new Bot(page);
+    // todo: logger init
+
+    await dataSource.initialize();
+
+    const myBot = new Bot();
     await myBot.init();
+    await myBot.login();
     await myBot.likeRecentNichePosts();
   } catch (error) {
     throw error;
@@ -14,11 +17,3 @@ async function main() {
 }
 
 main();
-
-// How many “Likes” can you do?
-
-// 120 per hour, or
-// 300-500 per day
-
-// don't act like a bot, leave space
-// leave comment report with account, posts,

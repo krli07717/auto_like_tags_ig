@@ -1,4 +1,8 @@
-node_modules
-build
-.env
+.idea/
+.vscode/
+node_modules/
+build/
+tmp/
+temp/
 config.json
+igbot.sqlite
