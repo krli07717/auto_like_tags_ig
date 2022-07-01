@@ -1,4 +1,8 @@
 {
   "username": "",
-  "password": ""
+  "password": "",
+  "tagsToLike": [
+    { "name": "sketchy", "priority": 1 },
+    { "name": "veggie", "priority": 2 }
+  ]
 }
