@@ -11,6 +11,8 @@ async function main() {
     await myBot.init();
     await myBot.login();
     await myBot.likeRecentNichePosts();
+    await myBot.getReport();
+    // myBot.exit();
   } catch (error) {
     throw error;
   }

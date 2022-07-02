@@ -9,8 +9,8 @@ import * as Config from "../config.json";
 const checkConfig = (config: IConfig) => config;
 const convertType = <T>(arg: any) => arg as T;
 
-const LIKES_LIMIT_OF_DAY = 20;
-const LIKES_LIMIT_PER_NICHE = 6;
+const LIKES_LIMIT_OF_DAY = 100;
+const LIKES_LIMIT_PER_NICHE = 12;
 const LIKE_INTERVAL_MILLISECONDS = 2000; //todo: speed in ~120 likes/hour
 const INSTAGRAM_WEBSITE = "https://www.instagram.com/";
 const getTagUrl = (tag: string) =>
@@ -26,6 +26,7 @@ export default class Bot {
   currentNicheLikes: number;
 
   private page: Page;
+  private likedUserTodayMap: Record<string, number> = {};
 
   constructor() {}
 
@@ -36,7 +37,7 @@ export default class Bot {
       this.niches = this.niches.sort((a, b) => a.priority - b.priority);
 
       // check likes today reach limit
-      await this.getLikesLeavedToday();
+      await this.initLikesLeavedToday();
       if (this.likesLeavedToday >= LIKES_LIMIT_OF_DAY)
         throw new Error("Likes leaved today already reach limit");
 
@@ -100,6 +101,10 @@ export default class Bot {
         return;
       }
 
+      log("Hello,", dbBotUser.username);
+
+      //todo: handle priority update
+
       const niches = await dataSource
         .getRepository(Niche)
         .createQueryBuilder("niche")
@@ -107,7 +112,33 @@ export default class Bot {
         .getMany();
 
       if (tagsToLike?.length) {
-        // todo: handle update tags
+        const dbNiches = niches.map((n) => n.nameTag);
+        const newTags = tagsToLike.filter(
+          (tag) => !dbNiches.includes(tag.name)
+        );
+        if (newTags.length) {
+          for (let i = 0; i < newTags.length; i++) {
+            //create niche for new tag
+            const niche = new Niche();
+            niche.nameTag = newTags[i].name;
+            niche.priority = newTags[i].priority;
+            niche.likes = [];
+            niches.push(niche);
+            niche.botUser = dbBotUser;
+            await dataSource.manager.save(niche);
+            log("create new niche", niche.nameTag);
+          }
+        }
+        log("use config tags");
+        const tagsNameInConfig = tagsToLike.map((tag) => tag.name);
+        this.niches = await dataSource
+          .getRepository(Niche)
+          .createQueryBuilder("niche")
+          .where("niche.nameTag IN (:...tag_name)", {
+            tag_name: tagsNameInConfig,
+          })
+          .getMany();
+        return;
       }
 
       log("use db niches");
@@ -142,13 +173,13 @@ export default class Bot {
     }
   }
 
-  private async getLikesLeavedToday() {
+  private async getAllLikesToday() {
     try {
       const todayStart = DateTime.now().toFormat("yyyy-LL-dd") + " 00:00:00";
       const todayEnd = DateTime.now().toFormat("yyyy-LL-dd") + " 23:59:59";
       const nicheIds = this.niches.map((n) => n.id);
 
-      const allLikesToday = await dataSource
+      return await dataSource
         .getRepository(Like)
         .createQueryBuilder("like")
         .select("_like")
@@ -157,6 +188,18 @@ export default class Bot {
         .andWhere("_like.timestamp <= :todayEnd", { todayEnd })
         .andWhere("_like.nicheId IN (:...id)", { id: nicheIds })
         .getMany();
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async initLikesLeavedToday() {
+    try {
+      const allLikesToday = await this.getAllLikesToday();
+
+      allLikesToday.forEach((like) => {
+        this.likedUserTodayMap[like.toUser] = 1;
+      });
 
       this.likesLeavedToday = allLikesToday.length;
       log("bot likes leaved today: ", this.likesLeavedToday);
@@ -185,7 +228,7 @@ export default class Bot {
       } else {
         log("auto like process complete.");
       }
-      process.exit(0);
+      // process.exit(0);
     } catch (error) {
       throw error;
     }
@@ -198,9 +241,9 @@ export default class Bot {
         this.likesLeavedToday < LIKES_LIMIT_OF_DAY &&
         this.currentNicheLikes < LIKES_LIMIT_PER_NICHE
       ) {
-        /**TODO: reach niche limit then getNextNiche */
         await this.likePost();
-        await this.goToNextPost();
+        const hasMorePost = await this.goToNextPost();
+        if (!hasMorePost) break;
       }
       if (this.currentNicheLikes >= LIKES_LIMIT_PER_NICHE) {
         log(
@@ -228,10 +271,12 @@ export default class Bot {
         "*[role=dialog] h2",
         (node) => node.textContent
       );
-      log(`like post from ${userLiked}`);
 
       await this.storeLikeToDb(userLiked);
 
+      log(`like post from ${userLiked}`);
+
+      this.likedUserTodayMap[userLiked] = 1;
       this.likesLeavedToday++;
       this.currentNicheLikes++;
 
@@ -249,7 +294,7 @@ export default class Bot {
       like.timestamp = DateTime.now().toFormat("yyyy-LL-dd HH:mm:ss");
 
       await dataSource.manager.save(like);
-      log("stored a like");
+      // log("stored a like");
     } catch (error) {
       throw error;
     }
@@ -257,12 +302,14 @@ export default class Bot {
 
   private async goToNextPost() {
     try {
-      log("go to next post");
-      //todo: handle if no more post
+      // log("go to next post");
+      const hasNextPost = this.page.$("*[aria-label=下一步]");
+      if (!hasNextPost) return false;
       await this.page.$eval("*[aria-label=下一步]", (node) =>
         node.parentElement?.click()
       );
       await this.ensurePostModalIsReady();
+      return true;
     } catch (error) {
       throw error;
     }
@@ -281,26 +328,45 @@ export default class Bot {
   private async shouldILikeThis() {
     try {
       /** likes in niche hashtag group, where not-yet-liked, likes-of-post <= 200, non-follower-account */
-      // todo:
-      // check if already restart from past last time
+      // todo check if already restart from past last time
 
       // check if already liked
       const liked = await this.page.$("*[aria-label=收回讚]");
-      if (liked) {
-        return false;
-      }
+      if (liked) return false;
 
-      // check if user is already follower ?
+      // todo: check if user is already follower ?
       // get followers list
 
-      // check if likes-of-post <= 200
-      /** handle hide likes */
-      /** handle yet no likes */
-      /** handle "萬" likes */
+      // check if likes-of-post <= 100
+
+      const postLikes = await this.page.$eval(
+        "article section:nth-child(2)",
+        (node) => node.textContent
+      );
+      const between0and10kLikes = /(\d+)\s*個讚/.exec(postLikes);
+      if (between0and10kLikes) {
+        // 10000 > likes > 100, dont like
+        if (+between0and10kLikes[1] > 100) return false;
+      }
+      const noLikesYet = /.*第一個.*/.test(postLikes);
+      const likesHidden = /.*其他人.*/.test(postLikes);
+      const postIsVideo = /.*觀看.*/.test(postLikes);
+      if (!noLikesYet && !between0and10kLikes) {
+        if (!likesHidden && !postIsVideo) {
+          // likes > 10000, dont like
+          return false;
+        }
+      }
 
       // check if is already 2nd post of same user I've liked today
+      const userToLike = await this.page.$eval(
+        "*[role=dialog] h2",
+        (node) => node.textContent
+      );
+      const hasLikedToday = this.likedUserTodayMap[userToLike];
+      if (hasLikedToday) return false;
 
-      // check if is shadow banned user (already be giving likes yet still not follower)
+      // todo: check if is shadow banned user (already be giving likes yet still not follower)
 
       return true;
     } catch (error) {
@@ -331,12 +397,12 @@ export default class Bot {
 
   async login() {
     try {
-      log("bot login");
-
       if (!this.niches)
         throw new Error("no niches found, try call init() first");
 
       await this.prepareBrowserPage();
+
+      log("bot login");
 
       await this.page.goto(INSTAGRAM_WEBSITE);
 
@@ -377,5 +443,40 @@ export default class Bot {
     } catch (error) {
       throw error;
     }
+  }
+
+  async getReport() {
+    try {
+      const todayStart = DateTime.now().toFormat("yyyy-LL-dd") + " 00:00:00";
+      const todayEnd = DateTime.now().toFormat("yyyy-LL-dd") + " 23:59:59";
+      const reportLikes = await dataSource
+        .getRepository(Like)
+        .createQueryBuilder("like")
+        .innerJoinAndSelect("like.niche", "niche")
+        .where("like.timestamp >= :todayStart", { todayStart })
+        .andWhere("like.timestamp <= :todayEnd", { todayEnd })
+        .getMany();
+      const nicheLikes: Partial<Record<string, number>> = {};
+      reportLikes.forEach((like) => {
+        if (nicheLikes[like.niche.nameTag]) {
+          nicheLikes[like.niche.nameTag]!++;
+          return;
+        }
+        nicheLikes[like.niche.nameTag] = 1;
+      });
+      let report = Object.keys(nicheLikes).reduce((acc, tag) => {
+        acc += `${tag}: ${nicheLikes[tag]}`;
+        acc += "\n";
+        return acc;
+      }, "\n---------Likes leaved today---------\n");
+      report += `Total: ${reportLikes.length}\n`;
+      log(report);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  exit() {
+    process.exit(0);
   }
 }
