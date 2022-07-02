@@ -9,9 +9,11 @@ import * as Config from "../config.json";
 const checkConfig = (config: IConfig) => config;
 const convertType = <T>(arg: any) => arg as T;
 
-const LIKES_LIMIT_OF_DAY = 100;
-const LIKES_LIMIT_PER_NICHE = 12;
-const LIKE_INTERVAL_MILLISECONDS = 2000; //todo: speed in ~120 likes/hour
+const LIKES_LIMIT_OF_DAY = 250;
+const LIKES_LIMIT_PER_NICHE = Math.floor(
+  LIKES_LIMIT_OF_DAY / Config.tagsToLike.length
+);
+const LIKE_INTERVAL_MILLISECONDS = 30000; //todo: speed in ~120 likes/hour
 const INSTAGRAM_WEBSITE = "https://www.instagram.com/";
 const getTagUrl = (tag: string) =>
   `https://www.instagram.com/explore/tags/${tag}/`;
@@ -97,7 +99,18 @@ export default class Bot {
         botUser.niche = niches;
         await dataSource.manager.save(botUser);
         log("created new bot user", username);
-        this.niches = niches;
+
+        const dbBotUser = await dataSource.manager.findOneBy(BotUser, {
+          username,
+        });
+
+        const dbNiches = await dataSource
+          .getRepository(Niche)
+          .createQueryBuilder("niche")
+          .where("niche.botUserId = :id", { id: dbBotUser!.id })
+          .getMany();
+
+        this.niches = dbNiches;
         return;
       }
 
@@ -273,7 +286,6 @@ export default class Bot {
       );
 
       await this.storeLikeToDb(userLiked);
-
       log(`like post from ${userLiked}`);
 
       this.likedUserTodayMap[userLiked] = 1;
@@ -308,7 +320,8 @@ export default class Bot {
       await this.page.$eval("*[aria-label=下一步]", (node) =>
         node.parentElement?.click()
       );
-      await this.ensurePostModalIsReady();
+      const canEnsureReady = await this.ensurePostModalIsReady();
+      if (!canEnsureReady) return false;
       return true;
     } catch (error) {
       throw error;
@@ -317,9 +330,15 @@ export default class Bot {
 
   private async ensurePostModalIsReady() {
     try {
-      await this.page.waitForSelector(
-        "*[role=dialog] h2"
-      ); /** wait for first post username selector */
+      try {
+        await this.page.waitForSelector(
+          "*[role=dialog] h2"
+        ); /** wait for first post username selector */
+        return true;
+      } catch (error) {
+        console.log("error: code 0001"); //debugging
+        return false;
+      }
     } catch (error) {
       throw error;
     }
@@ -366,7 +385,12 @@ export default class Bot {
       const hasLikedToday = this.likedUserTodayMap[userToLike];
       if (hasLikedToday) return false;
 
-      // todo: check if is shadow banned user (already be giving likes yet still not follower)
+      // handle 已驗證 username
+      const isBigUser = /.*已驗證.*/.exec(userToLike);
+      if (isBigUser) return false;
+
+      // !todo: check if is shadow banned user (already be giving likes yet still not follower)
+      // !todo: more tags in config better
 
       return true;
     } catch (error) {
@@ -426,8 +450,13 @@ export default class Bot {
       );
       await passwordInput?.type(this.password);
       await passwordInput?.press("Enter");
-      await this.page.waitForNavigation();
-      /** handle 2 step auth */
+      if (Config.hasTwoStepAuth) {
+        /** todo!: handle 2 step auth */
+        // wait and enter your passcode
+        await this.page.waitForTimeout(50000);
+      } else {
+        await this.page.waitForNavigation();
+      }
     } catch (error) {
       throw error;
     }
@@ -449,11 +478,15 @@ export default class Bot {
     try {
       const todayStart = DateTime.now().toFormat("yyyy-LL-dd") + " 00:00:00";
       const todayEnd = DateTime.now().toFormat("yyyy-LL-dd") + " 23:59:59";
+      const botUser = await dataSource.manager.findOneBy(BotUser, {
+        username: this.username,
+      });
       const reportLikes = await dataSource
         .getRepository(Like)
         .createQueryBuilder("like")
         .innerJoinAndSelect("like.niche", "niche")
-        .where("like.timestamp >= :todayStart", { todayStart })
+        .where("niche.botUserId = :id", { id: botUser?.id })
+        .andWhere("like.timestamp >= :todayStart", { todayStart })
         .andWhere("like.timestamp <= :todayEnd", { todayEnd })
         .getMany();
       const nicheLikes: Partial<Record<string, number>> = {};
