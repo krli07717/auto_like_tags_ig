@@ -29,6 +29,7 @@ export default class Bot {
 
   private page: Page;
   private likedUserTodayMap: Record<string, number> = {};
+  private botUserId: number;
 
   constructor() {}
 
@@ -43,7 +44,7 @@ export default class Bot {
       if (this.likesLeavedToday >= LIKES_LIMIT_OF_DAY)
         throw new Error("Likes leaved today already reach limit");
 
-      // todo: check followers
+      await this.initLikedUserMap();
     } catch (error) {
       throw error;
     }
@@ -104,15 +105,19 @@ export default class Bot {
           username,
         });
 
+        this.botUserId = dbBotUser!.id;
+
         const dbNiches = await dataSource
           .getRepository(Niche)
           .createQueryBuilder("niche")
-          .where("niche.botUserId = :id", { id: dbBotUser!.id })
+          .where("niche.botUserId = :id", { id: this.botUserId })
           .getMany();
 
         this.niches = dbNiches;
         return;
       }
+
+      this.botUserId = dbBotUser.id;
 
       log("Hello,", dbBotUser.username);
 
@@ -121,7 +126,7 @@ export default class Bot {
       const niches = await dataSource
         .getRepository(Niche)
         .createQueryBuilder("niche")
-        .where("niche.botUserId = :id", { id: dbBotUser.id })
+        .where("niche.botUserId = :id", { id: this.botUserId })
         .getMany();
 
       if (tagsToLike?.length) {
@@ -142,8 +147,18 @@ export default class Bot {
             log("create new niche", niche.nameTag);
           }
         }
-        log("use config tags");
+        //update priority
+        for (let i = 0; i < tagsToLike.length; i++) {
+          await dataSource
+            .createQueryBuilder()
+            .update(Niche)
+            .set({ priority: tagsToLike[i].priority })
+            .where("nameTag = :name", { name: tagsToLike[i].name })
+            .execute();
+        }
+
         const tagsNameInConfig = tagsToLike.map((tag) => tag.name);
+
         this.niches = await dataSource
           .getRepository(Niche)
           .createQueryBuilder("niche")
@@ -151,6 +166,9 @@ export default class Bot {
             tag_name: tagsNameInConfig,
           })
           .getMany();
+
+        log("use config tags");
+
         return;
       }
 
@@ -190,7 +208,12 @@ export default class Bot {
     try {
       const todayStart = DateTime.now().toFormat("yyyy-LL-dd") + " 00:00:00";
       const todayEnd = DateTime.now().toFormat("yyyy-LL-dd") + " 23:59:59";
-      const nicheIds = this.niches.map((n) => n.id);
+      const userNiches = await dataSource
+        .getRepository(Niche)
+        .createQueryBuilder("niche")
+        .where("niche.botUserId = :id", { id: this.botUserId })
+        .getMany();
+      const nicheIds = userNiches.map((niche) => niche.id);
 
       return await dataSource
         .getRepository(Like)
@@ -210,12 +233,42 @@ export default class Bot {
     try {
       const allLikesToday = await this.getAllLikesToday();
 
-      allLikesToday.forEach((like) => {
-        this.likedUserTodayMap[like.toUser] = 1;
-      });
-
       this.likesLeavedToday = allLikesToday.length;
       log("bot likes leaved today: ", this.likesLeavedToday);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async initLikedUserMap() {
+    try {
+      //select last 3 days liked users
+      const startDay =
+        DateTime.now().minus({ day: 2 }).toFormat("yyyy-LL-dd") + " 00:00:00";
+      const endDay = DateTime.now().toFormat("yyyy-LL-dd") + " 23:59:59";
+      const userNiches = await dataSource
+        .getRepository(Niche)
+        .createQueryBuilder("niche")
+        .where("niche.botUserId = :id", { id: this.botUserId })
+        .getMany();
+      const nicheIds = userNiches.map((niche) => niche.id);
+
+      const likes = await dataSource
+        .getRepository(Like)
+        .createQueryBuilder("like")
+        .select("_like")
+        .from(Like, "_like")
+        .where("_like.timestamp >= :startDay", { startDay })
+        .andWhere("_like.timestamp <= :endDay", { endDay })
+        .andWhere("_like.nicheId IN (:...id)", { id: nicheIds })
+        .getMany();
+
+      likes.forEach((like) => {
+        this.likedUserTodayMap[like.toUser] =
+          this.likedUserTodayMap[like.toUser] === undefined
+            ? 1
+            : this.likedUserTodayMap[like.toUser] + 1;
+      });
     } catch (error) {
       throw error;
     }
@@ -281,14 +334,17 @@ export default class Bot {
       ); // click like
 
       const userLiked = await this.page.$eval(
-        "*[role=dialog] h2",
+        "*[role=dialog] h2, *[role=dialog] h3",
         (node) => node.textContent
       );
 
       await this.storeLikeToDb(userLiked);
       log(`like post from ${userLiked}`);
 
-      this.likedUserTodayMap[userLiked] = 1;
+      this.likedUserTodayMap[userLiked] =
+        this.likedUserTodayMap[userLiked] === undefined
+          ? 1
+          : this.likedUserTodayMap[userLiked] + 1;
       this.likesLeavedToday++;
       this.currentNicheLikes++;
 
@@ -315,9 +371,9 @@ export default class Bot {
   private async goToNextPost() {
     try {
       // log("go to next post");
-      const hasNextPost = this.page.$("*[aria-label=下一步]");
+      const hasNextPost = this.page.$("svg[aria-label=下一步]");
       if (!hasNextPost) return false;
-      await this.page.$eval("*[aria-label=下一步]", (node) =>
+      await this.page.$eval("svg[aria-label=下一步]", (node) =>
         node.parentElement?.click()
       );
       const canEnsureReady = await this.ensurePostModalIsReady();
@@ -332,7 +388,7 @@ export default class Bot {
     try {
       try {
         await this.page.waitForSelector(
-          "*[role=dialog] h2"
+          "*[role=dialog] h2, *[role=dialog] h3"
         ); /** wait for first post username selector */
         return true;
       } catch (error) {
@@ -353,9 +409,6 @@ export default class Bot {
       const liked = await this.page.$("*[aria-label=收回讚]");
       if (liked) return false;
 
-      // todo: check if user is already follower ?
-      // get followers list
-
       // check if likes-of-post <= 100
 
       const postLikes = await this.page.$eval(
@@ -368,6 +421,9 @@ export default class Bot {
         if (+between0and10kLikes[1] > 100) return false;
       }
       const noLikesYet = /.*第一個.*/.test(postLikes);
+      if (noLikesYet) return false; // might be spam
+      //todo!: quota loop
+
       const likesHidden = /.*其他人.*/.test(postLikes);
       const postIsVideo = /.*觀看.*/.test(postLikes);
       if (!noLikesYet && !between0and10kLikes) {
@@ -377,9 +433,24 @@ export default class Bot {
         }
       }
 
+      // // check only hash tags in post and no likes, might be spam
+      // try {
+      //   const postCaption = await this.page.$eval(
+      //     "*[role=dialog] h2 + div span, *[role=dialog] h3 + div span",
+      //     (node) => node.innerHTML
+      //   );
+
+      //   if (postCaption) {
+      //     const onlyTagsNoCaption = /^\s*<a.*<\/a>\s*$/.test(postCaption);
+      //     if (onlyTagsNoCaption) return false; //might be spam
+      //   }
+      // } catch (error) {
+      //   console.log("error getting post caption");
+      // }
+
       // check if is already 2nd post of same user I've liked today
       const userToLike = await this.page.$eval(
-        "*[role=dialog] h2",
+        "*[role=dialog] h2, *[role=dialog] h3",
         (node) => node.textContent
       );
       const hasLikedToday = this.likedUserTodayMap[userToLike];
@@ -388,9 +459,6 @@ export default class Bot {
       // handle 已驗證 username
       const isBigUser = /.*已驗證.*/.exec(userToLike);
       if (isBigUser) return false;
-
-      // !todo: check if is shadow banned user (already be giving likes yet still not follower)
-      // !todo: more tags in config better
 
       return true;
     } catch (error) {
@@ -451,9 +519,8 @@ export default class Bot {
       await passwordInput?.type(this.password);
       await passwordInput?.press("Enter");
       if (Config.hasTwoStepAuth) {
-        /** todo!: handle 2 step auth */
         // wait and enter your passcode
-        await this.page.waitForTimeout(50000);
+        await this.page.waitForTimeout(90000);
       } else {
         await this.page.waitForNavigation();
       }
@@ -478,14 +545,11 @@ export default class Bot {
     try {
       const todayStart = DateTime.now().toFormat("yyyy-LL-dd") + " 00:00:00";
       const todayEnd = DateTime.now().toFormat("yyyy-LL-dd") + " 23:59:59";
-      const botUser = await dataSource.manager.findOneBy(BotUser, {
-        username: this.username,
-      });
       const reportLikes = await dataSource
         .getRepository(Like)
         .createQueryBuilder("like")
         .innerJoinAndSelect("like.niche", "niche")
-        .where("niche.botUserId = :id", { id: botUser?.id })
+        .where("niche.botUserId = :id", { id: this.botUserId })
         .andWhere("like.timestamp >= :todayStart", { todayStart })
         .andWhere("like.timestamp <= :todayEnd", { todayEnd })
         .getMany();
