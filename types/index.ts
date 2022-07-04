@@ -7,5 +7,5 @@ export interface IConfig {
   username: string;
   password: string;
   tagsToLike?: ITag[];
-  hasToStepAuth?: boolean;
+  hasTwoStepAuth?: boolean;
 }

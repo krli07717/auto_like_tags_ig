@@ -9,7 +9,7 @@ import * as Config from "../config.json";
 const checkConfig = (config: IConfig) => config;
 const convertType = <T>(arg: any) => arg as T;
 
-const LIKES_LIMIT_OF_DAY = 200;
+const LIKES_LIMIT_OF_DAY = 230;
 const LIKES_LIMIT_PER_NICHE = Math.floor(
   (LIKES_LIMIT_OF_DAY * 1.5) / Config.tagsToLike.length
 );
@@ -78,7 +78,7 @@ export default class Bot {
       if (!dbBotUser) {
         if (!config.tagsToLike?.length)
           throw new Error(
-            "new user must specify niche tags as string[] in config.json"
+            "new user must specify niche tags as ITag[] in config.json"
           );
         //todo: ensure tag name all diffrent string, priority all diffrent number
 
@@ -424,10 +424,10 @@ export default class Bot {
         "article section:nth-child(2)",
         (node) => node.textContent
       );
-      const between0and10kLikes = /(\d+)\s*個讚/.exec(postLikes);
-      if (between0and10kLikes) {
+      const between1and10kLikes = /(\d+)\s*個讚/.exec(postLikes);
+      if (between1and10kLikes) {
         // 10000 > likes > 100, dont like
-        if (+between0and10kLikes[1] > 100) return false;
+        if (+between1and10kLikes[1] > 100) return false;
       }
       const noLikesYet = /.*第一個.*/.test(postLikes);
       if (noLikesYet) return false; // might be spam
@@ -435,7 +435,7 @@ export default class Bot {
 
       const likesHidden = /.*其他人.*/.test(postLikes);
       const postIsVideo = /.*觀看.*/.test(postLikes);
-      if (!noLikesYet && !between0and10kLikes) {
+      if (!between1and10kLikes) {
         if (!likesHidden && !postIsVideo) {
           // likes > 10000, dont like
           return false;
