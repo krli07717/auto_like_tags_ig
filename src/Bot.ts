@@ -11,7 +11,7 @@ const convertType = <T>(arg: any) => arg as T;
 
 const LIKES_LIMIT_OF_DAY = 250;
 const LIKES_LIMIT_PER_NICHE = Math.floor(
-  LIKES_LIMIT_OF_DAY / Config.tagsToLike.length
+  (LIKES_LIMIT_OF_DAY * 1.5) / Config.tagsToLike.length
 );
 const LIKE_INTERVAL_MILLISECONDS = 30000; //todo: speed in ~120 likes/hour
 const INSTAGRAM_WEBSITE = "https://www.instagram.com/";
@@ -30,6 +30,7 @@ export default class Bot {
   private page: Page;
   private likedUserTodayMap: Record<string, number> = {};
   private botUserId: number;
+  private skippedPosts: number = 0;
 
   constructor() {}
 
@@ -283,9 +284,11 @@ export default class Bot {
       for (let i = 0; i < this.niches.length; i++) {
         if (this.likesLeavedToday >= LIKES_LIMIT_OF_DAY) break;
         this.currentNiche = this.niches[i];
+        this.skippedPosts = 0;
         await this.getCurrentNicheLikes();
         if (this.currentNicheLikes >= LIKES_LIMIT_PER_NICHE) continue;
-        await this.findFirstRecentNichePost();
+        const hasFirstPost = await this.findFirstRecentNichePost();
+        if (!hasFirstPost) continue;
         await this.likeNiche();
       }
 
@@ -305,11 +308,17 @@ export default class Bot {
       log("liking niche: ", this.currentNiche.nameTag);
       while (
         this.likesLeavedToday < LIKES_LIMIT_OF_DAY &&
-        this.currentNicheLikes < LIKES_LIMIT_PER_NICHE
+        this.currentNicheLikes < LIKES_LIMIT_PER_NICHE &&
+        this.skippedPosts < 20
       ) {
         await this.likePost();
         const hasMorePost = await this.goToNextPost();
         if (!hasMorePost) break;
+      }
+      if (this.skippedPosts >= 15) {
+        log(
+          `niche ${this.currentNiche.nameTag} has skipped 15 posts in a row; go to next niche`
+        );
       }
       if (this.currentNicheLikes >= LIKES_LIMIT_PER_NICHE) {
         log(
@@ -326,6 +335,7 @@ export default class Bot {
     try {
       const shouldLikeThis = await this.shouldILikeThis();
       if (!shouldLikeThis) {
+        this.skippedPosts++;
         return;
       }
 
@@ -345,6 +355,7 @@ export default class Bot {
         this.likedUserTodayMap[userLiked] === undefined
           ? 1
           : this.likedUserTodayMap[userLiked] + 1;
+      this.skippedPosts = 0;
       this.likesLeavedToday++;
       this.currentNicheLikes++;
 
@@ -434,19 +445,19 @@ export default class Bot {
       }
 
       // // check only hash tags in post and no likes, might be spam
-      // try {
-      //   const postCaption = await this.page.$eval(
-      //     "*[role=dialog] h2 + div span, *[role=dialog] h3 + div span",
-      //     (node) => node.innerHTML
-      //   );
+      try {
+        const postCaption = await this.page.$eval(
+          "*[role=dialog] h2 + div span, *[role=dialog] h3 + div span",
+          (node) => node.innerHTML
+        );
 
-      //   if (postCaption) {
-      //     const onlyTagsNoCaption = /^\s*<a.*<\/a>\s*$/.test(postCaption);
-      //     if (onlyTagsNoCaption) return false; //might be spam
-      //   }
-      // } catch (error) {
-      //   console.log("error getting post caption");
-      // }
+        if (postCaption) {
+          const onlyTagsNoCaption = /^\s*<a.*<\/a>\s*$/.test(postCaption);
+          if (onlyTagsNoCaption) return false; //might be spam
+        }
+      } catch (error) {
+        console.log("error getting post caption");
+      }
 
       // check if is already 2nd post of same user I've liked today
       const userToLike = await this.page.$eval(
@@ -473,15 +484,19 @@ export default class Bot {
         getTagUrl(this.currentNiche.nameTag)
       ); /** open other pages and like? sound too Bot */
       await this.handleModalDialog();
-      const firstPostLink = await this.page.waitForSelector(
-        "h2:nth-child(2) + div *[role=link]"
-      );
-      if (!firstPostLink)
-        throw new Error(
-          "first post link not found on page"
-        ); /**TODO: go to next niche */
-      await firstPostLink.click();
-      await this.ensurePostModalIsReady();
+      try {
+        const firstPostLink = await this.page.waitForSelector(
+          "h2:nth-child(2) + div *[role=link]"
+        );
+        await firstPostLink!.click();
+        await this.ensurePostModalIsReady();
+        return true;
+      } catch (error) {
+        console.log(
+          `first post link for ${this.currentNiche.nameTag} not found on page, go to next niche`
+        );
+        return false;
+      }
     } catch (error) {
       throw error;
     }

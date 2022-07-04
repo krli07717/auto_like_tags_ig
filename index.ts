@@ -6,6 +6,7 @@ async function main() {
   try {
     // todo: logger init
 
+    // todo: cli arg for only get report
     await dataSource.initialize();
 
     const myBot = new Bot();
