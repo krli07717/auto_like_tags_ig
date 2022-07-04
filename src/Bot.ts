@@ -9,11 +9,12 @@ import * as Config from "../config.json";
 const checkConfig = (config: IConfig) => config;
 const convertType = <T>(arg: any) => arg as T;
 
-const LIKES_LIMIT_OF_DAY = 250;
+const LIKES_LIMIT_OF_DAY = 200;
 const LIKES_LIMIT_PER_NICHE = Math.floor(
   (LIKES_LIMIT_OF_DAY * 1.5) / Config.tagsToLike.length
 );
-const LIKE_INTERVAL_MILLISECONDS = 30000; //todo: speed in ~120 likes/hour
+const SKIPPED_POSTS_TOLERANCE = 20;
+const LIKE_INTERVAL_MILLISECONDS = 30000;
 const INSTAGRAM_WEBSITE = "https://www.instagram.com/";
 const getTagUrl = (tag: string) =>
   `https://www.instagram.com/explore/tags/${tag}/`;
@@ -309,15 +310,15 @@ export default class Bot {
       while (
         this.likesLeavedToday < LIKES_LIMIT_OF_DAY &&
         this.currentNicheLikes < LIKES_LIMIT_PER_NICHE &&
-        this.skippedPosts < 20
+        this.skippedPosts < SKIPPED_POSTS_TOLERANCE
       ) {
         await this.likePost();
         const hasMorePost = await this.goToNextPost();
         if (!hasMorePost) break;
       }
-      if (this.skippedPosts >= 15) {
+      if (this.skippedPosts >= SKIPPED_POSTS_TOLERANCE) {
         log(
-          `niche ${this.currentNiche.nameTag} has skipped 15 posts in a row; go to next niche`
+          `niche ${this.currentNiche.nameTag} has skipped ${SKIPPED_POSTS_TOLERANCE} posts in a row; go to next niche`
         );
       }
       if (this.currentNicheLikes >= LIKES_LIMIT_PER_NICHE) {
@@ -413,9 +414,6 @@ export default class Bot {
 
   private async shouldILikeThis() {
     try {
-      /** likes in niche hashtag group, where not-yet-liked, likes-of-post <= 200, non-follower-account */
-      // todo check if already restart from past last time
-
       // check if already liked
       const liked = await this.page.$("*[aria-label=收回讚]");
       if (liked) return false;
