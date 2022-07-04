@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "ts-node index.ts",
+    "report": "ts-node index.ts --report",
     "start:nodemon": "tsc-watch --noClear --onSuccess \"node ./build/index.js\"",
     "build": "npx tsc",
     "test": "echo \"Error: no test specified\" && exit 1",

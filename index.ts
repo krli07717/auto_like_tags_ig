@@ -5,12 +5,16 @@ import puppeteer from "puppeteer";
 async function main() {
   try {
     // todo: logger init
-
-    // todo: cli arg for only get report
     await dataSource.initialize();
 
     const myBot = new Bot();
     await myBot.init();
+
+    if (process.argv.includes("--report")) {
+      await myBot.getReport();
+      return;
+    }
+
     await myBot.login();
     await myBot.likeRecentNichePosts();
     await myBot.getReport();
