@@ -6,6 +6,6 @@ export interface ITag {
 export interface IConfig {
   username: string;
   password: string;
-  tagsToLike?: ITag[];
+  tagsToLike: ITag[] | Omit<ITag, "priority">[];
   hasTwoStepAuth?: boolean;
 }

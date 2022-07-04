@@ -66,8 +66,9 @@ export default class Bot {
   private async initDb() {
     try {
       log("init db");
-      const config = checkConfig(Config);
-      const { username, tagsToLike } = config;
+      const config: IConfig = Config;
+      const { username } = config;
+      let { tagsToLike } = config;
       // await dataSource.initialize();
 
       // check if botUser already exists
@@ -75,8 +76,15 @@ export default class Bot {
         username,
       });
 
+      if (tagsToLike.some((tag) => !("priority" in tag))) {
+        tagsToLike = tagsToLike.map((tag, index) => ({
+          name: tag.name,
+          priority: index + 1,
+        }));
+      }
+
       if (!dbBotUser) {
-        if (!config.tagsToLike?.length)
+        if (!config.tagsToLike.length)
           throw new Error(
             "new user must specify niche tags as ITag[] in config.json"
           );
@@ -123,19 +131,17 @@ export default class Bot {
 
       log("Hello,", dbBotUser.username);
 
-      //todo: handle priority update
-
       const niches = await dataSource
         .getRepository(Niche)
         .createQueryBuilder("niche")
         .where("niche.botUserId = :id", { id: this.botUserId })
         .getMany();
 
-      if (tagsToLike?.length) {
+      if (tagsToLike.length) {
         const dbNiches = niches.map((n) => n.nameTag);
-        const newTags = tagsToLike.filter(
+        let newTags = tagsToLike.filter(
           (tag) => !dbNiches.includes(tag.name)
-        );
+        ) as ITag[];
         if (newTags.length) {
           for (let i = 0; i < newTags.length; i++) {
             //create niche for new tag
@@ -151,11 +157,12 @@ export default class Bot {
         }
         //update priority
         for (let i = 0; i < tagsToLike.length; i++) {
+          const tag = tagsToLike[i] as ITag;
           await dataSource
             .createQueryBuilder()
             .update(Niche)
-            .set({ priority: tagsToLike[i].priority })
-            .where("nameTag = :name", { name: tagsToLike[i].name })
+            .set({ priority: tag.priority })
+            .where("nameTag = :name", { name: tag.name })
             .execute();
         }
 
