@@ -9,12 +9,12 @@ import * as Config from "../config.json";
 const checkConfig = (config: IConfig) => config;
 const convertType = <T>(arg: any) => arg as T;
 
-const LIKES_LIMIT_OF_DAY = 230;
+const LIKES_LIMIT_OF_DAY = 180;
 const LIKES_LIMIT_PER_NICHE = Math.floor(
   (LIKES_LIMIT_OF_DAY * 1.5) / Config.tagsToLike.length
 );
 const SKIPPED_POSTS_TOLERANCE = 20;
-const LIKE_INTERVAL_MILLISECONDS = 30000;
+const LIKE_INTERVAL_MILLISECONDS = 40000;
 const INSTAGRAM_WEBSITE = "https://www.instagram.com/";
 const getTagUrl = (tag: string) =>
   `https://www.instagram.com/explore/tags/${tag}/`;
@@ -43,8 +43,6 @@ export default class Bot {
 
       // check likes today reach limit
       await this.initLikesLeavedToday();
-      if (this.likesLeavedToday >= LIKES_LIMIT_OF_DAY)
-        throw new Error("Likes leaved today already reach limit");
 
       await this.initLikedUserMap();
     } catch (error) {
@@ -289,6 +287,9 @@ export default class Bot {
       if (!this.niches || !this.page)
         throw new Error("bot not yet prepared, try init() then login()");
 
+      if (this.likesLeavedToday >= LIKES_LIMIT_OF_DAY)
+        throw new Error("Likes leaved today already reach limit");
+
       for (let i = 0; i < this.niches.length; i++) {
         if (this.likesLeavedToday >= LIKES_LIMIT_OF_DAY) break;
         this.currentNiche = this.niches[i];
@@ -392,6 +393,7 @@ export default class Bot {
       // log("go to next post");
       const hasNextPost = this.page.$("svg[aria-label=下一步]");
       if (!hasNextPost) return false;
+      await this.page.waitForTimeout(4000); // avoid being too spammy?
       await this.page.$eval("svg[aria-label=下一步]", (node) =>
         node.parentElement?.click()
       );
@@ -458,7 +460,8 @@ export default class Bot {
 
         if (postCaption) {
           const onlyTagsNoCaption = /^\s*<a.*<\/a>\s*$/.test(postCaption);
-          if (onlyTagsNoCaption) return false; //might be spam
+          const HKSpam = /.*香港生活.*/.test(postCaption);
+          if (onlyTagsNoCaption || HKSpam) return false; //might be spam
         }
       } catch (error) {
         console.log("error getting post caption");
