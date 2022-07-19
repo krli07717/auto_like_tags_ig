@@ -2,7 +2,8 @@
   "username": "",
   "password": "",
   "tagsToLike": [
-    { "name": "sketchy", "priority": 1 },
-    { "name": "veggie", "priority": 2 }
-  ]
+    { "name": "極簡", "priority": 1 },
+    { "name": "檜木傢俱", "priority": 2 }
+  ],
+  "hasTwoStepAuth": false
 }
